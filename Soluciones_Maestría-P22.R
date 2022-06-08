@@ -20,6 +20,7 @@ library(AER)
 library(schoolmath)
 library(jtools) 
 library(dplyr)
+library(estimatr)
 
 #library(optmatch)
 
@@ -28,7 +29,9 @@ library(dplyr)
 #install_github("vsemenova/leebounds")
 #library(leebounds)
 
-#Cargamos las bases de datos que ocuparemos durante la tarea
+# Seccion RCTs
+
+#Cargamos las bases de datos que ocuparemos en esta parte
 
 #Baseline
 baseline<-read.csv("baseline.csv")
@@ -46,16 +49,14 @@ endline <- data.frame(endline)
 
 
 # Creamos un dataframe con las variables de interés
-vars_1<- baseline%>%select(T_nap, age_,
-                     female_, education_, 
-                     no_of_children_,
-                     unemployed,
-                     stress, sleep_eff,
-                     health_bsl, out_of_bed, energy)
+baseline_filter <- baseline %>% select(T_nap, age_,female_, education_, 
+                     no_of_children_,unemployed, sleep_night, tot_earnings,
+                     health_bsl, time_in_office, energy) %>% na.omit()
 
 
 # Calculamos las medias de cada variable segun T_nap
-means_1 <- vars_1%>%group_by(T_nap)%>%summarise(across(age_:energy,~ mean(.x, na.rm = T)))
+means_1 <- baseline_filter %>% group_by(T_nap) %>% 
+          summarise(across(age_:energy,~ mean(.x, na.rm = T)))
 
 # Calculamos la diferencia de medias
 diff_1 <- c()
@@ -66,50 +67,49 @@ for (i in 2:11){
   tstat_1 <- c(tstat_1,round(summ(lm(vars_1[,i]~vars_1[,1]),robust = 'HC1')$coeftable[2,3],4))
   pval_1 <- c(pval_1,round(summ(lm(vars_1[,i]~vars_1[,1]),robust = 'HC1')$coeftable[2,4],4))
 }
+
 t_bal <- data.frame(trat = t(means_1[2,2:11]),control = t(means_1[1,2:11]),diff = diff_1,t = tstat_1,pvalue = pval_1)
-stargazer(t_bal,summary = F)
+stargazer(t_bal,summary = F, out="tabla_balance")
 
 # Calculamos el estadistico F y valor-p de un MCO
-mco_1 <- lm(T_nap ~ age_ + female_ + education_ + no_of_children_ + unemployed
-           + stress + sleep_eff + health_bsl + out_of_bed + energy, vars_1)
-lh <-linearHypothesis(mco_1, c("age_=0", "female_=0", "education_=0", "no_of_children_ =0", "unemployed=0", "stress=0", "sleep_eff=0","health_bsl=0", "out_of_bed =0", "energy=0"), white.adjust = "hc1")
-(F_1 <- lh$F[2])
-(pval_1 <- lh$`Pr(>F)`[2])
+f_test <- lm(T_nap ~ age_ + female_ + education_ + no_of_children_ + 
+               unemployed + sleep_night + tot_earnings + health_bsl + 
+               time_in_office + energy, data = baseline_filter)
+FT <-linearHypothesis(f_test, c("age_=0", "female_=0", "education_=0", 
+                                "no_of_children_ =0", "unemployed=0", 
+                                "sleep_night=0", "tot_earnings=0",
+                                "health_bsl=0", "time_in_office =0", 
+                                "energy=0"), white.adjust = "hc1")
+(F_1 <- FT$F[2])
+(pval_1 <- FT$`Pr(>F)`[2])
 
 # ====// Pregunta 2: EFECTOS DE TRATAMIENTO\\====
 
 # ==== Inciso (a) ====
 
 table_2_a <- endline %>% 
-  group_by("Productivity") %>% 
-  summarise(Neyman= round(mean(productivity[T_nap==1], na.rm = T)-mean(productivity[T_nap==0], na.rm = T),3),
-            SD = round(sqrt(var(productivity[T_nap==1], na.rm = T)/sum(T_nap == 1)+var(productivity[T_nap==0], na.rm = T)/sum(T_nap == 0)),3),
-            P_Value = round(2*pnorm(abs(Neyman / SD), 0, 1, lower.tail = F),3))
+  summarise(Neyman= round(mean(productivity[T_nap==1], na.rm = T)-mean(productivity[T_nap==0], na.rm = T),2),
+            SD = round(sqrt(var(productivity[T_nap==1], na.rm = T)/sum(T_nap == 1)+var(productivity[T_nap==0], na.rm = T)/sum(T_nap == 0)),4),
+            p_value = round(2*pnorm(abs(Neyman / SD), 0, 1, lower.tail = F),3))
 
 table_2_a %>% stargazer(summary = F,
                              rownames = F)
 
 # ==== Inciso (b) ====
 
-reg_2_b <- feols(productivity ~ T_nap, se = "hetero", data = endline)
-data_2_b<- data.frame(reg_2_b$coeftable)
-table_2_b <- endline %>% 
-  group_by("Productivity") %>% 
-  summarise(Neyman= round(data_2_b[2,1],3),
-            SD = round(data_2_b[2,2],3),
-            P_Value = round(data_2_b[2,4],3))
+reg_2_b <- lm_robust(productivity ~ T_nap, se = "HC1", data = endline)
+table_2_b <- c("Neyman"= round(reg_2_b$coefficients["T_nap"],2),
+            "SD" = round(reg_2_b$std.error["T_nap"],4),
+            "p_value" = round(reg_2_b$p.value["T_nap"],3))
 
-table_2_a %>% stargazer(summary = F,
+table_2_b %>% stargazer(summary = F,
                         rownames = F)
 # ==== Inciso (c) ====
 
-reg_2_c <- feols(productivity ~ T_nap + out_of_bed + energy, se = "hetero", data = endline)
-data_2_c<- data.frame(reg_2_c$coeftable)
-table_2_c <- endline %>% 
-  group_by("Productivity") %>% 
-  summarise(Neyman= round(data_2_c[2,1],3),
-            SD = round(data_2_c[2,2],3),
-            P_Value = round(data_2_c[2,4],3))
+reg_2_c <- lm_robust(productivity ~ T_nap + tot_earnings + energy, se = "HC1", data = endline)
+table_2_c <- c("Neyman"= round(reg_2_c$coefficients["T_nap"],2),
+               "SD" = round(reg_2_c$std.error["T_nap"],4),
+               "p_value" = round(reg_2_c$p.value["T_nap"],3))
 
 table_2_c %>% stargazer(summary = F,
                         rownames = F)
@@ -121,78 +121,71 @@ endline %<>% mutate(cognitive = (scale(corsi_measure)+scale(hf_measure)+scale(pv
 
 #Realizamos nuestras estimaciones
 
-reg_2_d_i <- feols(nap_time_mins ~ T_nap + out_of_bed + energy, se = "hetero", data = endline)
-data_2_d_i <- data.frame(reg_2_d_i$coeftable)
+reg_2_e_i <- lm(nap_time_mins ~ T_nap + tot_earnings + energy, se = "HC1", data = endline)
+se_2_e_i <- sqrt(diag(vcovHC(reg_2_e_i,type="HC1")))
+mn_2_e_i <- round(mean(endline$nap_time_mins[endline$T_nap==0]),3)
+mn_2_e_ib <- round(mean(endline$sleep_night[endline$T_nap==0], na.rm=T),3)
 
-reg_2_d_ii <- feols(sleep_report ~ T_nap + out_of_bed + energy, se = "hetero", data = endline)
-data_2_d_ii <- data.frame(reg_2_d_ii$coeftable)
+reg_2_e_ii <- lm(sleep_report ~ T_nap + tot_earnings + energy, se = "HC1", data = endline)
+se_2_e_ii <- sqrt(diag(vcovHC(reg_2_e_ii,type="HC1")))
+mn_2_e_ii <- round(mean(endline$sleep_report[endline$T_nap==0],na.rm = T),3)
 
-reg_2_d_iii <- feols(happy ~ T_nap + out_of_bed + energy, se = "hetero", data = endline)
-data_2_d_iii <- data.frame(reg_2_d_iii$coeftable)
+reg_2_e_iii <- lm(happy ~ T_nap + tot_earnings + energy, se = "HC1", data = endline)
+se_2_e_iii <- sqrt(diag(vcovHC(reg_2_e_iii,type="HC1")))
+mn_2_e_iii <- round(mean(endline$happy[endline$T_nap==0]),3)
 
-reg_2_d_iv <- feols(cognitive ~ T_nap + out_of_bed + energy, se = "hetero", data = endline)
-data_2_d_iv <- data.frame(reg_2_d_iv$coeftable)
+reg_2_e_iv <- lm(cognitive ~ T_nap + tot_earnings + energy, se = "HC1", data = endline)
+se_2_e_iv <- sqrt(diag(vcovHC(reg_2_e_iv,type="HC1")))
+mn_2_e_iv <- round(mean(endline$cognitive[endline$T_nap==0]),3)
 
-reg_2_d_v  <- feols(typing_time_hr ~ T_nap + out_of_bed + energy, se = "hetero", data = endline)
-data_2_d_v <- data.frame(reg_2_d_v$coeftable)
+reg_2_e_v  <- lm(typing_time_hr ~ T_nap + tot_earnings + energy, se = "HC1", data = endline)
+se_2_e_v <- sqrt(diag(vcovHC(reg_2_e_v,type="HC1")))
+mn_2_e_v <- round(mean(endline$typing_time_hr[endline$T_nap==0]),3)
 
 #Creamos una tabla para reportar los resultados
-Variable <- c("nap_time_mins", "sleep_report", 
-              "happy", "cognitive", "typing_time_hr")
-ATE <- c(round(data_2_d_i[2,1],3),round(data_2_d_ii[2,1],3),round(data_2_d_iii[2,1],3),round(data_2_d_iv[2,1],3),round(data_2_d_v[2,1],3))
-Valor_p <- c(round(data_2_d_i[2,4],3),round(data_2_d_ii[2,4],3),round(data_2_d_iii[2,4],3),round(data_2_d_iv[2,4],3),round(data_2_d_v[2,4],3))
-Media_Variable <- c(round(mean(nap_time_mins),3),round(mean(sleep_report,na.rm = T),3),round(mean(happy),3),round(mean(cognitive),3),round(mean(typing_time_hr),3))
+stargazer(reg_2_e_i, reg_2_e_ii, reg_2_e_iii, reg_2_e_iv, reg_2_e_v, 
+          dep.var.labels=c("nap time","sleep report","happy","cognitive", "typing time"),
+          se = list(se_2_e_i,se_2_e_ii,se_2_e_iii,se_2_e_iv,se_2_e_v),
+          add.lines = list("Mean" = c("Mean",mn_2_e_ib,mn_2_e_ii,mn_2_e_iii,mn_2_e_iv,mn_2_e_v)))
 
-#Tabla
-df_2_e <- data.frame(Variable, ATE,Valor_p, Media_Variable)
-df_2_e %>% stargazer(summary = F,
-                        rownames = F)
 
 # ====// Pregunta 3: FISCHER EXACT TEST \\====
 
 # ====Inciso (a) ====
 
-T_nap_1 <- mean(endline[endline$T_nap==1,'productivity'])
-T_nap_0 <- mean(endline[endline$T_nap==0,'productivity'])
+T_nap_1 <- mean(endline$productivity[endline$T_nap==1])
+T_nap_0 <- mean(endline$productivity[endline$T_nap==0])
+N_T <- sum(endline$T_nap)
 
-(neyman <- T_nap_1-T_nap_0) # Estadistico Neyman
+(neyman_p3 <- T_nap_1-T_nap_0) # Estadistico Neyman
 
-cb_varm_T_nap <- var(endline[endline$T_nap==1,'productivity'])/sum(with(endline,T_nap==1)) 
-cb_varm_T_nap_0 <- var(endline[endline$T_nap==0,'productivity'])/sum(with(endline,T_nap==0))
+FETs_data <- endline %>% select(productivity,T_nap)
 
-(sd_neyman <- sqrt(cb_varm_T_nap+cb_varm_T_nap_0))
-
-PET <- endline%>%select(productivity,T_nap)
-PET <- rownames_to_column(PET)
-
-t_stats_4 <- c() 
+the_sims <- c() 
 
 for (j in 1:999) {
-  # Re-aleatorizacion: Tomamos el vector que contiene la dummy de T_nap y le damos un nuevo orden 
-  fake <- sample_n(as.data.frame(PET$T_nap),length(PET$T_nap),replace = F)
-  # Le asignamos un "nombre" a cada observacion, de esta forma podemos unirla a la endline original
-  fake <- rownames_to_column(fake) 
-  # Unimos a la base origina el vector de T_nap re-aleatorizado, de esta forma logramos una nueva asignacion de T_nap
-  df <- left_join(PET,fake) 
-  
-  cb_T_nap <- mean(df[df$`PET$T_nap`==1,'productivity']) 
-  cb_T_not_nap <- mean(df[df$`PET$T_nap`==0,'productivity'])
-  cb_vm_T_nap <- var(df[df$`PET$T_nap`==1,'productivity'])/sum(with(df,`PET$T_nap`==1))
-  cb_vm_T_not_nap <- var(df[df$`PET$T_nap`==0,'productivity'])/sum(with(df,`PET$T_nap`==0))
-  
-  # Neyman
-  ney <- cb_T_nap-cb_T_not_nap
-  # Error std Neyman
-  sd_ney <- sqrt(cb_vm_T_nap+cb_vm_T_not_nap) 
-  # Estadistico t
-  t_stats_4 <- c(t_stats_4,ney/sd_ney)
+  # Re-aleatorizacion: Generamos un numero aleatorio, ordenamos
+  FETs_data <- FETs_data %>% mutate(rnum = runif(n())) %>% arrange(rnum)
+  # Los N_T individuos con el numero aleatorio mas pequeno reciben tratamiento
+  rnum_cut <- FETs_data$rnum[N_T]
+  FETs_data <- FETs_data %>% mutate(T_fake = ifelse(rnum<=rnum_cut,1,0))
+  # Calculamos la diferencia de medias y la guardamos
+  diff_fake <- mean(FETs_data$productivity[FETs_data$T_fake==1]) - mean(FETs_data$productivity[FETs_data$T_fake==0])
+  the_sims <- c(the_sims,diff_fake)
+  #Restablecemos la base inicial
+  FETs_data <- FETs_data %>% select(productivity,T_nap)
 }
 
-# Estadisticos t
-t_stats_4 <- c(t_stats_4,(neyman/sd_neyman))
+# Histograma con el resultado de FETs
+the_sims <- c(the_sims,neyman_p3)
+the_sims <- as.data.frame(the_sims)
+ggplot(the_sims,aes(x=the_sims)) + geom_histogram() + 
+  geom_vline(xintercept = neyman_p3, color = "red") + theme_classic()
+ggsave("Histograma_preg3_FETs.png",  width = 5.54, height = 4.95)
 
 # Valor-p
-(pval_4 <- sum(abs((t_stats_4))>abs((neyman+0.01)/sd_neyman))/length(t_stats_4)) 
+the_sims <- the_sims %>% mutate(id_pval = abs(the_sims)>abs(neyman_p3))
+(pval_3 <- sum(the_sims$id_pval)/length(the_sims$the_sims)) 
 
 
 # ====// Pregunta 4: ESTRATIFICACIÓN \\====
@@ -218,14 +211,16 @@ table_4_a %>% stargazer(summary = F,
 
 #Creamos los grupos definidos en la tarea en endline
 endline <- endline %>% 
-  inner_join(select(baseline, sleep_more_median, earnings_more_median,pid), by = "pid")%>% 
+  inner_join(select(baseline, sleep_more_median, earnings_more_median,pid), by = "pid") %>% 
   mutate(group = if_else(sleep_more_median == 1 & earnings_more_median==1, 1, 
-                         if_else(sleep_more_median == 1 & earnings_more_median==0, 2,
-                                 if_else(sleep_more_median == 0 & earnings_more_median==1, 3,4))))
+                         if_else(sleep_more_median == 0 & earnings_more_median==1, 2,
+                                 if_else(sleep_more_median == 1 & earnings_more_median==0, 3,4))),
+         NT = ifelse(T_nap==1,1,0), NC = 1-NT)
 #Calculamos Neyman
 table_4_b_mean <- endline %>% 
   group_by(group) %>% 
-  summarise(nap_time_mins = round(mean(nap_time_mins[T_nap==1], na.rm = T)-mean(nap_time_mins[T_nap==0], na.rm = T),3),
+  summarise(NT = sum(NT), NC = sum(NC), N = NT + NC,
+            nap_time_mins = round(mean(nap_time_mins[T_nap==1], na.rm = T)-mean(nap_time_mins[T_nap==0], na.rm = T),3),
             sleep_report = round(mean(sleep_report[T_nap==1], na.rm = T)-mean(sleep_report[T_nap==0], na.rm = T),3),
             happy = round(mean(happy[T_nap==1], na.rm = T)-mean(happy[T_nap==0], na.rm = T),3),
             cognitive = round(mean(cognitive[T_nap==1], na.rm = T)-mean(cognitive[T_nap==0], na.rm = T),3),
@@ -247,13 +242,13 @@ table_4_b_sd %>% stargazer(summary = F,
                              rownames = F)
 
 #Calculamos los ATE agregados
-table_4_b_aggregated <- endline %>% 
+ATE_4_b_aggregated <- endline %>% 
   group_by("ATE Agregado") %>% 
-  summarise(round(table_4_b_mean[1,2]*sum(group == 1)/length(group) + table_4_b_mean[2,2]*sum(group == 2)/length(group) + table_4_b_mean[3,2]*sum(group == 3)/length(group) + table_4_b_mean[4,2]*sum(group == 4)/length(group),3),
-            round(table_4_b_mean[1,3]*sum(group == 1)/length(group) + table_4_b_mean[2,3]*sum(group == 2)/length(group) + table_4_b_mean[3,3]*sum(group == 3)/length(group) + table_4_b_mean[4,3]*sum(group == 4)/length(group),3),
-            round(table_4_b_mean[1,4]*sum(group == 1)/length(group) + table_4_b_mean[2,4]*sum(group == 2)/length(group) + table_4_b_mean[3,4]*sum(group == 3)/length(group) + table_4_b_mean[4,4]*sum(group == 4)/length(group),3),
-            round(table_4_b_mean[1,5]*sum(group == 1)/length(group) + table_4_b_mean[2,5]*sum(group == 2)/length(group) + table_4_b_mean[3,5]*sum(group == 3)/length(group) + table_4_b_mean[4,5]*sum(group == 4)/length(group),3),
-            round(table_4_b_mean[1,6]*sum(group == 1)/length(group) + table_4_b_mean[2,6]*sum(group == 2)/length(group) + table_4_b_mean[3,6]*sum(group == 3)/length(group) + table_4_b_mean[4,6]*sum(group == 4)/length(group),3))
+  summarise(round(table_4_b_mean[1,5]*sum(group == 1)/length(group) + table_4_b_mean[2,5]*sum(group == 2)/length(group) + table_4_b_mean[3,5]*sum(group == 3)/length(group) + table_4_b_mean[4,5]*sum(group == 4)/length(group),3),
+            round(table_4_b_mean[1,6]*sum(group == 1)/length(group) + table_4_b_mean[2,6]*sum(group == 2)/length(group) + table_4_b_mean[3,6]*sum(group == 3)/length(group) + table_4_b_mean[4,6]*sum(group == 4)/length(group),3),
+            round(table_4_b_mean[1,7]*sum(group == 1)/length(group) + table_4_b_mean[2,7]*sum(group == 2)/length(group) + table_4_b_mean[3,7]*sum(group == 3)/length(group) + table_4_b_mean[4,7]*sum(group == 4)/length(group),3),
+            round(table_4_b_mean[1,8]*sum(group == 1)/length(group) + table_4_b_mean[2,8]*sum(group == 2)/length(group) + table_4_b_mean[3,8]*sum(group == 3)/length(group) + table_4_b_mean[4,8]*sum(group == 4)/length(group),3),
+            round(table_4_b_mean[1,9]*sum(group == 1)/length(group) + table_4_b_mean[2,9]*sum(group == 2)/length(group) + table_4_b_mean[3,9]*sum(group == 3)/length(group) + table_4_b_mean[4,9]*sum(group == 4)/length(group),3))
 
 #Tabla
 table_4_b_aggregated %>% stargazer(summary = F,
@@ -281,13 +276,13 @@ data_4_c <- endline %>%
   mutate(g_1 = if_else(group == 1,1,0),
          g_2 = if_else(group == 2,1,0),
          g_3 = if_else(group == 3,1,0),
-         g_4 = if_else(group == 4,1,0))%>%
-  select(pid,T_nap,nap_time_mins,sleep_report,happy,cognitive,typing_time_hr,productivity,g_1,g_2,g_3,g_4)%>%
-  group_by(pid)
+         g_4 = if_else(group == 4,1,0)) %>%
+  select(pid,T_nap,nap_time_mins,sleep_report,happy,cognitive,typing_time_hr,productivity,g_1,g_2,g_3,g_4) %>%
+  ungroup()
 
 #Creación de tabla
 table_4_c <- data.frame(Grupo = character(0), nap_time_mins = numeric(0), sleep_report = numeric(0), happy = numeric(0), cognitive = numeric(0), typing_time_hr = numeric(0))
-table_4_c["Grupo"]=c(1,"",2,"",3,"",4,"")
+
 for (i in Variable){
   reg <- lm(paste(i, "g_1 + g_2 + g_3 + g_4 + T_nap:g_1 + T_nap:g_2 + T_nap:g_3 + T_nap:g_4-1" , sep = "~"),se = "hetero", data = data_4_c)
   reg_cov <-sqrt(diag(vcovHC(reg, type = "HC1")))
@@ -300,6 +295,8 @@ for (i in Variable){
     count_coeff <- count_coeff +1
   }
 }
+
+table_4_c["Grupo"] <- c("1","","2","","3","","4","")
 
 #Tabla
 table_4_c %>% stargazer(summary = F,
