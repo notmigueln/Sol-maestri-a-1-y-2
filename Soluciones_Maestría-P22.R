@@ -63,9 +63,9 @@ diff_1 <- c()
 tstat_1 <- c()
 pval_1 <- c()
 for (i in 2:11){
-  diff_1 <- c(diff_1,round(summ(lm(vars_1[,i]~vars_1[,1]),robust = 'HC1')$coeftable[2,1],4))
-  tstat_1 <- c(tstat_1,round(summ(lm(vars_1[,i]~vars_1[,1]),robust = 'HC1')$coeftable[2,3],4))
-  pval_1 <- c(pval_1,round(summ(lm(vars_1[,i]~vars_1[,1]),robust = 'HC1')$coeftable[2,4],4))
+  diff_1 <- c(diff_1,round(summ(lm(baseline_filter[,i]~baseline_filter[,1]),robust = 'HC1')$coeftable[2,1],2))
+  tstat_1 <- c(tstat_1,round(summ(lm(baseline_filter[,i]~baseline_filter[,1]),robust = 'HC1')$coeftable[2,3],2))
+  pval_1 <- c(pval_1,round(summ(lm(baseline_filter[,i]~baseline_filter[,1]),robust = 'HC1')$coeftable[2,4],3))
 }
 
 t_bal <- data.frame(trat = t(means_1[2,2:11]),control = t(means_1[1,2:11]),diff = diff_1,t = tstat_1,pvalue = pval_1)
@@ -321,77 +321,93 @@ table_5_a %>% stargazer(summary = F,
 #Validez interna
 
 # Filtramos nuestras variables para evaluar solo a los participantes que se quedaron
+# Repetimos los pasos de la tabla de balance inicial
 
-vars_5_b_VI<- baseline%>%
-  filter(drop_indicator==0)%>%
-  select(T_nap, age_,
-         female_, education_, 
-         no_of_children_,
-         unemployed,
-         stress, sleep_eff,
-         health_bsl, out_of_bed, energy)
+vars_5_b_VI<- baseline %>% filter(drop_indicator==0)%>%
+  select(T_nap, age_,female_, education_, 
+         no_of_children_,unemployed, sleep_night, tot_earnings,
+         health_bsl, time_in_office, energy) %>% na.omit()
 
 # Calculamos las medias de cada variable segun T_nap
 
-means_5_b_VI <- vars_5_b_VI%>%group_by(T_nap)%>%summarise(across(age_:energy,~ mean(.x, na.rm = T)))
+means_5_b_VI <- vars_5_b_VI %>% group_by(T_nap) %>% 
+  summarise(across(age_:energy,~ mean(.x, na.rm = T)))
 
 # Calculamos la diferencia de medias
 diff_5_b_VI <- c()
 tstat_5_b_VI <- c()
 pval_5_b_VI <- c()
+
 for (i in 2:11){
-  diff_5_b_VI <- c(diff_5_b_VI,round(summ(lm(vars_5_b_VI[,1]~vars_5_b_VI[,i]),robust = 'HC1')$coeftable[2,1],4))
-  tstat_5_b_VI <- c(tstat_5_b_VI,round(summ(lm(vars_5_b_VI[,1]~vars_5_b_VI[,i]),robust = 'HC1')$coeftable[2,3],4))
-  pval_5_b_VI <- c(pval_5_b_VI,round(summ(lm(vars_5_b_VI[,1]~vars_5_b_VI[,i]),robust = 'HC1')$coeftable[2,4],4))
+  diff_5_b_VI <- c(diff_5_b_VI,round(summ(lm(vars_5_b_VI[,1]~vars_5_b_VI[,i]),robust = 'HC1')$coeftable[2,1],2))
+  tstat_5_b_VI <- c(tstat_5_b_VI,round(summ(lm(vars_5_b_VI[,1]~vars_5_b_VI[,i]),robust = 'HC1')$coeftable[2,3],2))
+  pval_5_b_VI <- c(pval_5_b_VI,round(summ(lm(vars_5_b_VI[,1]~vars_5_b_VI[,i]),robust = 'HC1')$coeftable[2,4],3))
 }
+
 t_bal_5_b_VI <- data.frame(trat = t(means_5_b_VI[2,2:11]),control = t(means_5_b_VI[1,2:11]),diff = diff_5_b_VI,t = tstat_5_b_VI,pvalue = pval_5_b_VI)
 
 # Calculamos el estadistico F y valor-p de un MCO
-mco_5_b_VI <- lm(T_nap ~ age_ + female_ + education_ + no_of_children_ + unemployed
-                 + stress + sleep_eff + health_bsl + out_of_bed + energy, vars_5_b_VI)
-lh <-linearHypothesis(mco_5_b_VI, c("age_=0", "female_=0", "education_=0", "no_of_children_ =0", "unemployed=0", "stress=0", "sleep_eff=0","health_bsl=0", "out_of_bed =0", "energy=0"), white.adjust = "hc1")
+mco_5_b_VI <- lm(T_nap ~ age_ + female_ + education_ + no_of_children_ + 
+                   unemployed + sleep_night + tot_earnings + health_bsl + 
+                   time_in_office + energy, data = vars_5_b_VI)
+lh <-linearHypothesis(mco_5_b_VI, c("age_=0", "female_=0", "education_=0", 
+                                    "no_of_children_ =0", "unemployed=0", 
+                                    "sleep_night=0", "tot_earnings=0",
+                                    "health_bsl=0", "time_in_office =0", 
+                                    "energy=0"), white.adjust = "hc1")
 (F_5_b_VI <- lh$F[2])
 (pval_5_b_VI <- lh$`Pr(>F)`[2])
 
-stargazer(t_bal_5_b_VI,summary = F, notes = paste("Estadístico F = ", round(F_5_b_VI,3),". Valor-p = ",round(pval_5_b_VI,3), sep=""))
+stargazer(t_bal_5_b_VI,summary = F, 
+          notes = paste("Estadístico F = ", round(F_5_b_VI,3),
+                        ". Valor-p = ",round(pval_5_b_VI,3), sep=""))
 
 
 #Validez externa
 
 # Filtramos nuestras base para evaluar las diferencias entre los individuos que permanecieron en el estudio contra los que se fueron
 
-vars_5_b_VE<- baseline%>%
-  select(drop_indicator, age_,
-         female_, education_, 
-         no_of_children_,
-         unemployed,
-         stress, sleep_eff,
-         health_bsl, out_of_bed, energy)
+vars_5_b_VE<- baseline %>%
+  select(drop_indicator, age_,female_, education_, 
+         no_of_children_,unemployed, sleep_night, tot_earnings,
+         health_bsl, time_in_office, energy) %>% na.omit()
 
 # Calculamos las medias de cada variable segun drop_indicator
-
-means_5_b_VE <- vars_5_b_VE%>%group_by(drop_indicator)%>%summarise(across(age_:energy,~ mean(.x, na.rm = T)))
+means_5_b_VE <- vars_5_b_VE %>% group_by(drop_indicator) %>%
+  summarise(across(age_:energy,~ mean(.x, na.rm = T)))
 
 # Calculamos la diferencia de medias
 diff_5_b_VE <- c()
 tstat_5_b_VE <- c()
 pval_5_b_VE <- c()
+
 for (i in 2:11){
-  diff_5_b_VE <- c(diff_5_b_VE,round(summ(lm(vars_5_b_VE[,i]~vars_5_b_VE[,1]),robust = 'HC1')$coeftable[2,1],4))
-  tstat_5_b_VE <- c(tstat_5_b_VE,round(summ(lm(vars_5_b_VE[,i]~vars_5_b_VE[,1]),robust = 'HC1')$coeftable[2,3],4))
-  pval_5_b_VE <- c(pval_5_b_VE,round(summ(lm(vars_5_b_VE[,i]~vars_5_b_VE[,1]),robust = 'HC1')$coeftable[2,4],4))
+  diff_5_b_VE <- c(diff_5_b_VE,round(summ(lm(vars_5_b_VE[,i]~vars_5_b_VE[,1]),robust = 'HC1')$coeftable[2,1],2))
+  tstat_5_b_VE <- c(tstat_5_b_VE,round(summ(lm(vars_5_b_VE[,i]~vars_5_b_VE[,1]),robust = 'HC1')$coeftable[2,3],2))
+  pval_5_b_VE <- c(pval_5_b_VE,round(summ(lm(vars_5_b_VE[,i]~vars_5_b_VE[,1]),robust = 'HC1')$coeftable[2,4],3))
 }
 
-t_bal_5_b_VE <- data.frame(Stayed = t(means_5_b_VE[1,2:11]), Dropped = t(means_5_b_VE[2,2:11]),diff = diff_5_b_VE,t = tstat_5_b_VE,pvalue = pval_5_b_VE)
+t_bal_5_b_VE <- data.frame(Stayed = t(means_5_b_VE[1,2:11]), 
+                           Dropped = t(means_5_b_VE[2,2:11]),
+                           diff = diff_5_b_VE,
+                           t = tstat_5_b_VE,
+                           pvalue = pval_5_b_VE)
 
 # Calculamos el estadistico F y valor-p de un MCO
-mco_5_b_VE <- lm(drop_indicator ~ age_ + female_ + education_ + no_of_children_ + unemployed
-                 + stress + sleep_eff + health_bsl + out_of_bed + energy, vars_5_b_VE)
-lh <-linearHypothesis(mco_5_b_VE, c("age_=0", "female_=0", "education_=0", "no_of_children_ =0", "unemployed=0", "stress=0", "sleep_eff=0","health_bsl=0", "out_of_bed =0", "energy=0"), white.adjust = "hc1")
+mco_5_b_VE <- lm(drop_indicator ~ age_ + female_ + education_ + no_of_children_ + 
+                   unemployed + sleep_night + tot_earnings + health_bsl + 
+                   time_in_office + energy, vars_5_b_VE)
+lh <-linearHypothesis(mco_5_b_VE, c("age_=0", "female_=0", "education_=0", 
+                                    "no_of_children_ =0", "unemployed=0", 
+                                    "sleep_night=0", "tot_earnings=0",
+                                    "health_bsl=0", "time_in_office =0", 
+                                    "energy=0"), white.adjust = "hc1")
 (F_5_b_VE <- lh$F[2])
 (pval_5_b_VE <- lh$`Pr(>F)`[2])
 
-stargazer(t_bal_5_b_VE,summary = F, notes = paste("Estadístico F = ", round(F_5_b_VE,3),". Valor-p = ",round(pval_5_b_VE,3), sep=""))
+stargazer(t_bal_5_b_VE,summary = F, 
+          notes = paste("Estadístico F = ", round(F_5_b_VE,3),
+                        ". Valor-p = ",round(pval_5_b_VE,3), sep=""))
 
 
 # ====// Pregunta 6: LEE BOUNDS \\====
@@ -416,27 +432,24 @@ data_6_a %>% stargazer(summary = F,
 
 # ==== Inciso (b) ====
 
-#Estimamos el número de individuos que pertenecen a Always Respondents
+#Estimamos el número de individuos que pertenecen a Always Respondents en tratamiento
+N_AR <-round(sum((endline$T_nap==1)*AR))
 
-N_AR <-round(sum((endline$drop_indicator==0 & endline$T_nap==1)*(1-((SR)/(SR+AR)))))
-
-#Creamos el intervalo
-
-#Cota inferior y superior
-data_lee_bounds <- sort(endline$productivity[endline$drop_indicator==0 & endline$T_nap==1])
-CI <- mean(data_lee_bounds[1:N_AR])
-CS <-mean(data_lee_bounds[length(data_lee_bounds):(length(data_lee_bounds)-N_AR+1)])
+#Cota inferior y superior para la media de tratamiento
+CI <- endline %>% filter(drop_indicator==0 & T_nap ==1) %>%
+  select(productivity) %>% arrange(productivity) %>% 
+  filter(productivity<=productivity[N_AR]) %>% ungroup() %>%
+  summarise(productivity = mean(productivity))
+  
+CS <- endline %>% filter(drop_indicator==0 & T_nap ==1) %>%
+  select(productivity) %>% arrange(-productivity) %>% 
+  filter(productivity>=productivity[N_AR]) %>% ungroup() %>%
+  summarise(productivity = mean(productivity))
 
 #Media de productividad AR
-control_6_b <- mean(endline$productivity[drop_indicator==0 & T_nap==0])
+control_6_b <- mean(endline$productivity[endline$drop_indicator==0 & endline$T_nap==0])
 
-(Lee_Bounds <- c(CI-control_6_b,CS-control_6_b))
-
-#Lee-Bounds Método 2?
-
-#leedata <- data.frame(treat = endline$T_nap, selection = abs(endline$drop_indicator-1), outcome = endline$productivity)
-#leedata %>% drop_na()
-#(GetBounds(leebounds(leedata)))
+(Lee_Bounds <- c(CI[1,1]-control_6_b,CS[1,1]-control_6_b))
 
 
 # ====/// PARTE 2 \\\====
@@ -444,6 +457,33 @@ control_6_b <- mean(endline$productivity[drop_indicator==0 & T_nap==0])
 # ====// Pregunta 1: COARSENED EXACT MATCH \\====
 
 #Realizamos CEM
+matching_data <- endline %>% filter(drop_indicator==0) %>% select(pid,productivity,female_,education_,age_,T_nap) %>%
+  left_join(baseline %>% select(pid,sleep_report),by="pid")
+
+# Weights originales antes de perder observaciones
+weights_before <- baseline %>% group_by(female_,education_) %>% summarise(wgt_orig = n()) %>% ungroup()
+
+# Hago la agrupacion usando las variables female y education y calculo medias condicionales
+matching_means <- matching_data %>% group_by(female_,education_) %>% summarise(N = n(), NT = sum(T_nap==1), NC= sum(T_nap==0),
+                                                             Mean_T = sum(productivity*T_nap)/sum(T_nap),
+                                                             Mean_C = sum(productivity*(1-T_nap))/sum(1-T_nap)) %>%
+                                    mutate(N_drop = N*(NT==0 | NC==0)) %>% 
+                                    ungroup() %>%
+                                    left_join(weights_before,by = c("female_","education_"))
+
+# Identifico situaciones que no tienen medias para Tratamiento y control. Estos casos los vamos a tener que borrar
+(N_lost <- sum(matching_means$N_drop))
+(N_lost/sum(matching_means$N))
+
+(CEM <- matching_means %>% filter(NT>0 & NC>0) %>%
+  mutate(diff_mean = Mean_T-Mean_C) %>% 
+  summarise(ATE = sum(diff_mean*wgt_orig)/sum(wgt_orig)))
+
+# Diferencia de medias que habriamos obtenido sin ponderar
+(DIfM <- mean(matching_data$productivity[matching_data$T_nap==1]) - mean(matching_data$productivity[matching_data$T_nap==0]))
+
+
+# Existe tambien un comando para hacer matching, sin embargo, no estoy familiarizado con el procedimiento utilizado
 CEM <- matchit(T_nap ~ female_ + education_, data=endline %>% filter(drop_indicator==0), method = "cem", estimand = "ATE")
 cem_d <- match.data(CEM)
 CEM_model <- feols(productivity ~ T_nap, data = match.data(CEM), se="hetero", weights=cem_d$weights)
@@ -453,6 +493,7 @@ data_CEM_model<-data.frame(CEM_model$coeftable)
 table_2_1 <- c(ATE=round(data_CEM_model[2,1],3),SD=round(data_CEM_model[2,2],3),Valor_p=round(data_CEM_model[2,4],3),Perdida=nrow(endline %>% filter(drop_indicator==0))-nrow(cem_d))
 table_2_1 %>% stargazer(summary = F,
                         rownames = F)
+
 
 # ====// Pregunta 2: NEAREST NEIGHBOR \\====
 
