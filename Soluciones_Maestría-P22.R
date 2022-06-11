@@ -21,6 +21,7 @@ library(schoolmath)
 library(jtools) 
 library(dplyr)
 library(estimatr)
+library(fixest)
 
 #library(optmatch)
 
@@ -327,7 +328,7 @@ vars_5_b_VI<- baseline %>% filter(drop_indicator==0)%>%
   select(T_nap, age_,female_, education_, 
          no_of_children_,unemployed, sleep_night, tot_earnings,
          health_bsl, time_in_office, energy) %>% na.omit()
-
+ 
 # Calculamos las medias de cada variable segun T_nap
 
 means_5_b_VI <- vars_5_b_VI %>% group_by(T_nap) %>% 
@@ -457,8 +458,9 @@ control_6_b <- mean(endline$productivity[endline$drop_indicator==0 & endline$T_n
 # ====// Pregunta 1: COARSENED EXACT MATCH \\====
 
 #Realizamos CEM
-matching_data <- endline %>% filter(drop_indicator==0) %>% select(pid,productivity,female_,education_,age_,T_nap) %>%
-  left_join(baseline %>% select(pid,sleep_report),by="pid")
+matching_data <- endline %>% filter(drop_indicator==0) %>% select(pid,productivity,T_nap) %>%
+  left_join(baseline %>% select(pid,sleep_report,female_,education_,age_,no_of_children_,tot_earnings,
+                                time_in_office,energy,unemployed,sleep_night,health_bsl),by="pid") %>% na.omit()
 
 # Weights originales antes de perder observaciones
 weights_before <- baseline %>% group_by(female_,education_) %>% summarise(wgt_orig = n()) %>% ungroup()
@@ -476,6 +478,10 @@ matching_means <- matching_data %>% group_by(female_,education_) %>% summarise(N
 (N_lost/sum(matching_means$N))
 
 (CEM <- matching_means %>% filter(NT>0 & NC>0) %>%
+    mutate(diff_mean = Mean_T-Mean_C) %>% 
+    summarise(ATE = sum(diff_mean*N)/sum(N)))
+
+(CEM_IPW <- matching_means %>% filter(NT>0 & NC>0) %>%
   mutate(diff_mean = Mean_T-Mean_C) %>% 
   summarise(ATE = sum(diff_mean*wgt_orig)/sum(wgt_orig)))
 
@@ -484,7 +490,7 @@ matching_means <- matching_data %>% group_by(female_,education_) %>% summarise(N
 
 
 # Existe tambien un comando para hacer matching, sin embargo, no estoy familiarizado con el procedimiento utilizado
-CEM <- matchit(T_nap ~ female_ + education_, data=endline %>% filter(drop_indicator==0), method = "cem", estimand = "ATE")
+CEM <- matchit(T_nap ~ female_ + factor(education_), data=endline %>% filter(drop_indicator==0), method = "cem", estimand = "ATE")
 cem_d <- match.data(CEM)
 CEM_model <- feols(productivity ~ T_nap, data = match.data(CEM), se="hetero", weights=cem_d$weights)
 data_CEM_model<-data.frame(CEM_model$coeftable)
@@ -497,27 +503,29 @@ table_2_1 %>% stargazer(summary = F,
 
 # ====// Pregunta 2: NEAREST NEIGHBOR \\====
 
-
-base_nn <- endline %>% filter(drop_indicator == 0) %>%
-                            left_join(baseline %>% 
-                            filter(drop_indicator == 0)%>% 
-                            select(pid, sleep_report) %>% 
-                            rename(BASE_sleep_report = sleep_report),
-                          by = "pid") 
-
 # Estimación un nearest neighbor
-nn_1 <-matchit(T_nap ~ female_ + age_ + BASE_sleep_report, data=base_nn, method ="nearest", distance = "mahalanobis", estimand ='ATT',ratio=1, replace = TRUE)
+nn_1 <-matchit(T_nap ~ female_ + age_ + sleep_report, 
+               data=matching_data, method ="nearest", 
+               distance = "mahalanobis", estimand ='ATT',
+               ratio=1, replace = TRUE)
+
 data_nn_1 <- match.data(nn_1)
 nn_1_model <- feols(productivity ~ T_nap, data = data_nn_1, se = "hetero", weights = data_nn_1$weights)
 
 # Estimación cinco nearest neighbors
-nn_5 <-matchit(T_nap ~ female_ + age_ + BASE_sleep_report, data=base_nn, method ="nearest", distance = "mahalanobis", estimand ='ATT',ratio=5, replace = TRUE)
+nn_5 <-matchit(T_nap ~ female_ + age_ + sleep_report, 
+               data=matching_data, method ="nearest", 
+               distance = "mahalanobis", estimand ='ATT',
+               ratio=5, replace = TRUE)
 data_nn_5 <- match.data(nn_5)
 nn_5_model <- feols(productivity ~ T_nap, data = data_nn_5, se = "hetero", weights = data_nn_5$weights)
 
 
 # Estimación diez nearest neighbors
-nn_10 <-matchit(T_nap ~ female_ + age_ + BASE_sleep_report, data=base_nn, method ="nearest", distance = "mahalanobis", estimand ='ATT',ratio=10, replace = TRUE)
+nn_10 <-matchit(T_nap ~ female_ + age_ + sleep_report, 
+                data=matching_data, method ="nearest", 
+                distance = "mahalanobis", estimand ='ATT',
+                ratio=10, replace = TRUE)
 data_nn_10 <- match.data(nn_10)
 nn_10_model <- feols(productivity ~ T_nap, data = data_nn_10, weights = data_nn_10$weights)
 
@@ -535,46 +543,60 @@ table_2_2 %>% stargazer(summary = F,
 # ====// Inciso (a)
 
 #Estimaciones
-PSM_r_1 <- feols(T_nap ~ age_ +female_+ education_+ out_of_bed +energy, data = endline %>% filter(drop_indicator==0), se = "hetero")
-PSM_r_2 <- feglm(T_nap ~ age_ +female_+ education_+ out_of_bed +energy, data = endline%>% filter(drop_indicator==0), se = "hetero", family="probit")
-PSM_r_3<- feglm(T_nap ~ age_ +female_+ education_+ out_of_bed +energy, data = endline%>% filter(drop_indicator==0), se = "hetero", family="logit")
+PSM_r_1 <- feols(T_nap ~ education_+ no_of_children_ + tot_earnings + time_in_office + energy, data = matching_data, se = "hetero")
+PSM_r_2 <- feglm(T_nap ~ education_+ no_of_children_ + tot_earnings + time_in_office + energy, data = matching_data, se = "hetero", family="probit")
+PSM_r_3<- feglm(T_nap ~ education_+ no_of_children_ + tot_earnings + time_in_office + energy, data = matching_data, se = "hetero", family="logit")
 
 #Tabla
 etable(PSM_r_1,PSM_r_2,PSM_r_3, tex = TRUE)
 
+
+# PSM
+matching_data <- matching_data %>% mutate(psm_mpl = PSM_r_1$fitted.values,
+                                          psm_probit = PSM_r_2$fitted.values,
+                                          psm_logit = PSM_r_3$fitted.values)
+
+stargazer(matching_data %>% select(psm_mpl,psm_probit,psm_logit))
+
+
 # ====// Inciso (b)
 
 #Estimaciones
-data_PSM_r_1 <- data.frame(pr_score= stats::predict(PSM_r_1, type="response"),
-                    T_nap = (endline %>% filter(drop_indicator==0))$T_nap)
-data_PSM_r_2 <- data.frame(pr_score= stats::predict(PSM_r_2, type="response"),
-                        T_nap = (endline %>% filter(drop_indicator==0))$T_nap)
-data_PSM_r_3 <- data.frame(pr_score= stats::predict(PSM_r_3, type="response"),
-                       T_nap = (endline %>% filter(drop_indicator==0))$T_nap)
-rep_PSM_r_1 <- matchit(T_nap ~ age_ +female_+ education_+ out_of_bed +energy,
-                      method = "nearest", data = endline %>% filter(drop_indicator==0), distance = "glm", estimand = "ATT",
+rep_PSM_r_1 <- matchit(T_nap ~ education_+ no_of_children_ + tot_earnings + time_in_office + energy,
+                      method = "nearest", data = matching_data, distance = "glm", estimand = "ATT",
                       ratio = 1, replace = TRUE)
-rep_PSM_r_2<- matchit(T_nap ~ age_ +female_+ education_+ out_of_bed +energy,
-                          method = "nearest", data = endline %>% filter(drop_indicator==0), distance = "glm", link = "probit", estimand = "ATT",
+rep_PSM_r_2<- matchit(T_nap ~ education_+ no_of_children_ + tot_earnings + time_in_office + energy,
+                          method = "nearest", data = matching_data, distance = "glm", link = "probit", estimand = "ATT",
                           ratio = 1, replace = TRUE)
-rep_PSM_r_3 <- matchit(T_nap ~ age_ +female_+ education_+ out_of_bed +energy,
-                         method = "nearest", data = endline %>% filter(drop_indicator==0), distance = "glm", link = "logit", estimand = "ATT",
+rep_PSM_r_3 <- matchit(T_nap ~ education_+ no_of_children_ + tot_earnings + time_in_office + energy,
+                         method = "nearest", data = matching_data, distance = "glm", link = "logit", estimand = "ATT",
                          ratio = 1, replace = TRUE)
 
+# Elementos para el reponderador
+NT_psm <- sum(matching_data$T_nap==1)
+NC_psm <- sum(matching_data$T_nap==0)
+weight_C <- 1/NC_psm
+
 #Cáluculo de media y SD
-data_PSM_b <- endline %>% filter(drop_indicator==0) %>%
-  mutate(OLS = data_PSM_r_1$pr_score, 
-         Probit = data_PSM_r_2$pr_score,
-         Logit = data_PSM_r_3$pr_score,
-         OLS_rep = rep_PSM_r_1$weights,
-         Probit_rep = rep_PSM_r_2$weights,
-         Logit_rep = rep_PSM_r_3$weights) 
+matching_data <- matching_data %>% 
+  mutate(num_OLS = psm_mpl/(1-psm_mpl),
+         num_probit = psm_probit/(1-psm_probit),
+         num_logit = psm_logit/(1-psm_logit))
+
+denom_OLS <- sum(data_PSM_b$num_OLS[data_PSM_b$T_nap==0])    
+denom_probit <- sum(data_PSM_b$num_probit[data_PSM_b$T_nap==0])    
+denom_logit <- sum(data_PSM_b$num_logit[data_PSM_b$T_nap==0])    
+
+data_PSM_b <- matching_data %>% 
+          mutate(OLS_reweight = ifelse(T_nap==1,1,NC_psm*num_OLS/denom_OLS),
+                 probit_reweight = ifelse(T_nap==1,1,NC_psm*num_probit/denom_probit),
+                 logit_reweight = ifelse(T_nap==1,1,NC_psm*num_logit/denom_logit))
 
 #Creamos las tablas para reportar nuestros resultados
 
 #Tabla 1
 table_PSM_b_1 <- data_PSM_b %>%
-  select(c("T_nap","OLS","Probit", "Logit")) %>%
+  select(c("T_nap","psm_mpl","psm_probit", "psm_logit")) %>%
   group_by(T_nap) %>%
   summarise_all(list(mean,sd))
 table_PSM_b_1<-round(table_PSM_b_1,3)
@@ -582,7 +604,7 @@ table_PSM_b_1%>% stargazer(summary = F,
                            rownames = F)
 #Tabla 2
 table_PSM_b_2 <- data_PSM_b %>%
-  select(c("T_nap","OLS_rep", "Probit_rep", "Logit_rep")) %>%
+  select(c("T_nap","OLS_reweight", "probit_reweight", "logit_reweight")) %>%
   group_by(T_nap) %>%
   summarise_all(list(mean,sd))
 table_PSM_b_2<-round(table_PSM_b_2,3)
@@ -592,43 +614,93 @@ table_PSM_b_2%>% stargazer(summary = F,
 # ====// Inciso (c)
 
 # Filtramos nuestras variables para evaluar solo a los participantes que se quedaron y utilizamos ponderador
-variables_7 <-  vars_1%>%filter(drop_indicator == 0)
-variables_7 <- variables_7*data_PSM_b$Probit_rep
+matching_data <- matching_data %>% 
+  mutate(OLS_reweight = ifelse(T_nap==1,1,NC_psm*num_OLS/denom_OLS),
+         probit_reweight = ifelse(T_nap==1,1,NC_psm*num_probit/denom_probit),
+         logit_reweight = ifelse(T_nap==1,1,NC_psm*num_logit/denom_logit))
 
-# Calculamos las medias de cada variable segun T_nap
+balance_matching <- matching_data %>% select(T_nap, age_,female_, education_, 
+                                             no_of_children_,unemployed, sleep_night, tot_earnings,
+                                             health_bsl, time_in_office, energy,probit_reweight) %>%
+  mutate_at(c("age_","female_", "education_","no_of_children_","unemployed", "sleep_night", "tot_earnings",
+              "health_bsl", "time_in_office", "energy"),list(wt = ~ ifelse(T_nap==1,.*probit_reweight/NT_psm,.*probit_reweight/NC_psm))) %>%
+  group_by(T_nap) %>% summarise(across(age__wt:energy_wt,~ sum(.x, na.rm = T)))
 
-means_7_c<- variables_7%>%group_by(T_nap)%>%summarise(across(age_:energy,~ mean(.x, na.rm = T)))
 
-# Calculamos la diferencia de medias
-diff_7_c <- c()
-tstat_7_c <- c()
-pval_7_c <- c()
-for (i in 2:11){
-  diff_7_c <- c(diff_7_c,round(summ(lm(variables_7[,i]~variables_7[,1]),robust = 'HC1')$coeftable[2,1],4))
-  tstat_7_c <- c(tstat_7_c,round(summ(lm(variables_7[,i]~variables_7[,1]),robust = 'HC1')$coeftable[2,3],4))
-  pval_7_c <- c(pval_7_c,round(summ(lm(variables_7[,i]~variables_7[,1]),robust = 'HC1')$coeftable[2,4],4))
-}
-t_bal_7_c <- data.frame(trat = t(means_7_c[2,2:11]),control = t(means_7_c[1,2:11]),diff = diff_7_c,t = tstat_7_c,pvalue = pval_7_c)
+# Aqui esta la prueba de balance para cada media. Estaria bien hacer esto con un loop, algo como lapply
+bal1 <- feols(age_ ~ T_nap, data = matching_data, se="hetero", weights=matching_data$probit_reweight)
+bal2 <- feols(female_ ~ T_nap, data = matching_data, se="hetero", weights=matching_data$probit_reweight)
+bal3 <- feols(education_ ~ T_nap, data = matching_data, se="hetero", weights=matching_data$probit_reweight)
+bal4 <- feols(no_of_children_ ~ T_nap, data = matching_data, se="hetero", weights=matching_data$probit_reweight)
+bal5 <- feols(unemployed ~ T_nap, data = matching_data, se="hetero", weights=matching_data$probit_reweight)
+bal6 <- feols(sleep_night ~ T_nap, data = matching_data, se="hetero", weights=matching_data$probit_reweight)
+bal7 <- feols(tot_earnings ~ T_nap, data = matching_data, se="hetero", weights=matching_data$probit_reweight)
+bal8 <- feols(health_bsl ~ T_nap, data = matching_data, se="hetero", weights=matching_data$probit_reweight)
+bal9 <- feols(time_in_office ~ T_nap, data = matching_data, se="hetero", weights=matching_data$probit_reweight)
+bal10 <- feols(energy ~ T_nap, data = matching_data, se="hetero", weights=matching_data$probit_reweight)
+
+
+diff_7_c <- c(round(bal1$coeftable[2,1],2),
+              round(bal2$coeftable[2,1],2),
+              round(bal3$coeftable[2,1],2),
+              round(bal4$coeftable[2,1],2),
+              round(bal5$coeftable[2,1],2),
+              round(bal6$coeftable[2,1],2),
+              round(bal7$coeftable[2,1],2),
+              round(bal8$coeftable[2,1],2),
+              round(bal9$coeftable[2,1],2),
+              round(bal10$coeftable[2,1],2))
+tstat_7_c <- c(round(bal1$coeftable[2,3],2),
+               round(bal2$coeftable[2,3],2),
+               round(bal3$coeftable[2,3],2),
+               round(bal4$coeftable[2,3],2),
+               round(bal5$coeftable[2,3],2),
+               round(bal6$coeftable[2,3],2),
+               round(bal7$coeftable[2,3],2),
+               round(bal8$coeftable[2,3],2),
+               round(bal9$coeftable[2,3],2),
+               round(bal10$coeftable[2,3],2))
+pval_7_c <- c(round(bal1$coeftable[2,4],2),
+              round(bal2$coeftable[2,4],2),
+              round(bal3$coeftable[2,4],2),
+              round(bal4$coeftable[2,4],2),
+              round(bal5$coeftable[2,4],2),
+              round(bal6$coeftable[2,4],2),
+              round(bal7$coeftable[2,4],2),
+              round(bal8$coeftable[2,4],2),
+              round(bal9$coeftable[2,4],2),
+              round(bal10$coeftable[2,4],2))
+
+t_bal_7_c <- data.frame(trat = t(balance_matching[2,2:11]),control = t(balance_matching[1,2:11]),diff = diff_7_c,t = tstat_7_c,pvalue = pval_7_c)
 
 # Calculamos el estadistico F y valor-p de un MCO
-mco_7_c <- lm(T_nap ~ age_ + female_ + education_ + no_of_children_ + unemployed
-                 + stress + sleep_eff + health_bsl + out_of_bed + energy, variables_7)
-lh <-linearHypothesis(mco_7_c, c("age_=0", "female_=0", "education_=0", "no_of_children_ =0", "unemployed=0", "stress=0", "sleep_eff=0","health_bsl=0", "out_of_bed =0", "energy=0"), white.adjust = "hc1")
-(F_7_c <- lh$F[2])
-(pval_7_c <- lh$`Pr(>F)`[2])
+mco_7_c <- feols(T_nap ~ age_ + female_ + education_ + no_of_children_ +unemployed + sleep_night + tot_earnings +
+              health_bsl + time_in_office + energy, data = matching_data, weights = matching_data$probit_reweight)
+lh <-linearHypothesis(mco_7_c, c("age_=0", "female_=0", "education_=0", 
+                                 "no_of_children_ =0", "unemployed=0", 
+                                 "sleep_night=0", "tot_earnings=0",
+                                 "health_bsl=0", "time_in_office =0", 
+                                 "energy=0"), white.adjust = "hc1")
+(F_7_c <- lh[2,2])
+(pval_7_c <- lh[2,3])
 
 #Creación de tabla
 stargazer(t_bal_7_c,summary = F, notes = paste("Estadístico F = ", round(F_7_c,3),". Valor-p = ",round(pval_7_c,3), sep=""))
 
 # ====// Inciso (d)
 
+# Pegar el weight a la base de datos de outcomes
+matching_outcomes <- endline %>% filter(drop_indicator==0) %>%
+  select(pid,productivity,nap_time_mins,sleep_report,happy,cognitive,typing_time_hr,T_nap) %>%
+  left_join(matching_data %>% select(pid,probit_reweight), by = "pid")
+
 #Estimación TOT
-reg_6_d_prod <- feols(productivity ~ T_nap, data = match.data(rep_PSM_r_2), se = "hetero")
-reg_6_d_ntm <- feols(nap_time_mins ~ T_nap, data = match.data(rep_PSM_r_2), se = "hetero")
-reg_6_d_sr <- feols(sleep_report ~ T_nap, data = match.data(rep_PSM_r_2), se = "hetero")
-reg_6_d_happ <- feols(happy ~ T_nap, data = match.data(rep_PSM_r_2), se = "hetero")
-reg_6_d_cogn <- feols(cognitive ~ T_nap, data = match.data(rep_PSM_r_2), se = "hetero")
-reg_6_d_tth <- feols(typing_time_hr ~ T_nap, data = match.data(rep_PSM_r_2), se = "hetero")
+reg_6_d_prod <- feols(productivity ~ T_nap, data = matching_outcomes, se = "hetero",weights=matching_outcomes$probit_reweight)
+reg_6_d_ntm <- feols(nap_time_mins ~ T_nap, data = matching_outcomes, se = "hetero",weights=matching_outcomes$probit_reweight)
+reg_6_d_sr <- feols(sleep_report ~ T_nap, data = matching_outcomes, se = "hetero",weights=matching_outcomes$probit_reweight)
+reg_6_d_happ <- feols(happy ~ T_nap, data = matching_outcomes, se = "hetero",weights=matching_outcomes$probit_reweight)
+reg_6_d_cogn <- feols(cognitive ~ T_nap, data = matching_outcomes, se = "hetero",weights=matching_outcomes$probit_reweight)
+reg_6_d_tth <- feols(typing_time_hr ~ T_nap, data = matching_outcomes, se = "hetero",weights=matching_outcomes$probit_reweight)
 
 #Creación de tabla
 table_2_2 <- data.frame(Variables = c("productivity","","nap_time_mins","","slee_report","","happy","","cognitive","","typing_time_hr",""),
